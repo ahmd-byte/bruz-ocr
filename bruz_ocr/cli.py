@@ -9,10 +9,14 @@ import typer
 
 from bruz_ocr import __version__
 from bruz_ocr.capture.errors import DocumentIngestionError
+from bruz_ocr.capture.repository import DocumentRepository
 from bruz_ocr.capture.service import DocumentIngestionService
 from bruz_ocr.config import Settings
 from bruz_ocr.database import initialize_database
 from bruz_ocr.logging import configure_logging
+from bruz_ocr.quality.errors import QualityAssessmentError
+from bruz_ocr.quality.models import QualityStatus
+from bruz_ocr.quality.service import QualityService
 
 app = typer.Typer(help="Bruz OCR: local document intelligence.", no_args_is_help=True)
 
@@ -66,6 +70,37 @@ def ingest(path: Path) -> None:
     typer.echo(f"Size: {document.file_size_bytes} bytes")
     typer.echo(f"SHA-256: {document.sha256}")
     typer.echo(f"Duplicate candidate: {'Yes' if result.duplicate_candidate else 'No'}")
+
+
+@app.command()
+def quality(document_id: str, json_output: bool = typer.Option(False, "--json")) -> None:
+    """Assess the stored pages of an ingested document."""
+    settings = Settings()
+    configure_logging(settings.debug)
+    try:
+        document = DocumentRepository(settings.database_path).get(document_id)
+        if document is None:
+            typer.echo("Document ID not found.", err=True)
+            raise typer.Exit(code=1)
+        result = QualityService(settings).assess_document(document)
+    except (OSError, sqlite3.Error, RuntimeError, QualityAssessmentError) as error:
+        typer.echo(f"Quality assessment failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo("Bruz OCR Quality Assessment")
+    typer.echo(f"Document: {document.original_filename}")
+    typer.echo(f"Pages: {document.page_count}")
+    typer.echo(f"Overall: {result.overall_status.value}")
+    for page in result.pages:
+        typer.echo(f"Page {page.page_number}: {page.overall_status.value}")
+        if page.error:
+            typer.echo(f"  Reason: {page.error}")
+        for check in page.checks:
+            typer.echo(f"  {check.name}: {check.status.value}")
+            if check.status != QualityStatus.PASS:
+                typer.echo(f"    Reason: {check.reason}")
 
 
 @app.command()

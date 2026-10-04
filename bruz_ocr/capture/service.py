@@ -221,6 +221,7 @@ class DocumentIngestionService:
                                     width=image.width,
                                     height=image.height,
                                     image_path=image_path.name,
+                                    metadata={"render_dpi": PDF_DPI},
                                 )
                             )
                     LOGGER.info(
@@ -250,6 +251,14 @@ class DocumentIngestionService:
                             "Image dimensions exceed the configured pixel limit."
                         )
                     image.load()
+                    dpi = image.info.get("dpi")
+                    reported_dpi = (
+                        [float(dpi[0]), float(dpi[1])]
+                        if isinstance(dpi, tuple)
+                        and len(dpi) == 2
+                        and all(isinstance(value, (int, float)) for value in dpi)
+                        else None
+                    )
                     normalized = ImageOps.exif_transpose(image)
                     image_path = pages_dir / "page-0001.png"
                     normalized.save(image_path, format="PNG")
@@ -262,4 +271,10 @@ class DocumentIngestionService:
         ) as error:
             raise CorruptDocumentError("Image cannot be decoded.") from error
         LOGGER.info("page_rendered", extra={"document_id": document_id, "page_number": 1})
-        return DocumentPage(page_number=1, width=width, height=height, image_path=image_path.name)
+        return DocumentPage(
+            page_number=1,
+            width=width,
+            height=height,
+            image_path=image_path.name,
+            metadata={"reported_dpi": reported_dpi} if reported_dpi is not None else {},
+        )

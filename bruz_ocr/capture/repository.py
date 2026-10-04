@@ -1,5 +1,6 @@
 """SQLite persistence for document metadata; document bytes stay on disk."""
 
+import json
 from contextlib import closing
 from pathlib import Path
 
@@ -25,8 +26,8 @@ class DocumentRepository:
             with connection:
                 connection.execute(
                     "INSERT INTO documents (id, original_filename, file_type, mime_type, "
-                    "sha256, file_size_bytes, page_count, storage_path, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "sha256, file_size_bytes, page_count, storage_path, created_at, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         document.document_id,
                         document.original_filename,
@@ -37,12 +38,13 @@ class DocumentRepository:
                         document.page_count,
                         document.storage_path,
                         document.created_at.isoformat(),
+                        json.dumps(document.metadata),
                     ),
                 )
                 connection.executemany(
                     "INSERT INTO document_pages "
-                    "(document_id, page_number, width, height, image_path) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "(document_id, page_number, width, height, image_path, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     [
                         (
                             document.document_id,
@@ -50,7 +52,48 @@ class DocumentRepository:
                             page.width,
                             page.height,
                             page.image_path,
+                            json.dumps(page.metadata),
                         )
                         for page in document.pages
                     ],
                 )
+
+    def get(self, document_id: str) -> Document | None:
+        with closing(connect_database(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT id, original_filename, file_type, mime_type, sha256, "
+                "file_size_bytes, page_count, storage_path, created_at, metadata_json "
+                "FROM documents WHERE id = ?",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            page_rows = connection.execute(
+                "SELECT page_number, width, height, image_path, metadata_json "
+                "FROM document_pages WHERE document_id = ? ORDER BY page_number",
+                (document_id,),
+            ).fetchall()
+        return Document.model_validate(
+            {
+                "document_id": row[0],
+                "original_filename": row[1],
+                "file_type": row[2],
+                "mime_type": row[3],
+                "sha256": row[4],
+                "file_size_bytes": row[5],
+                "page_count": row[6],
+                "storage_path": row[7],
+                "created_at": row[8],
+                "metadata": json.loads(row[9]),
+                "pages": [
+                    {
+                        "page_number": page[0],
+                        "width": page[1],
+                        "height": page[2],
+                        "image_path": page[3],
+                        "metadata": json.loads(page[4]),
+                    }
+                    for page in page_rows
+                ],
+            }
+        )

@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def connect_database(path: Path) -> sqlite3.Connection:
@@ -52,6 +52,21 @@ def initialize_database(path: Path) -> None:
                     "PRIMARY KEY (document_id, page_number))"
                 )
                 connection.execute("PRAGMA user_version=2")
+                current_version = 2
+            if current_version == 2:
+                connection.execute(
+                    "ALTER TABLE documents ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"
+                )
+                connection.execute(
+                    "ALTER TABLE document_pages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'"
+                )
+                connection.execute(
+                    "CREATE TABLE quality_assessments ("
+                    "document_id TEXT PRIMARY KEY REFERENCES documents(id), "
+                    "result_json TEXT NOT NULL, assessed_at TEXT NOT NULL, "
+                    "algorithm_version INTEGER NOT NULL)"
+                )
+                connection.execute("PRAGMA user_version=3")
 
 
 def database_is_ready(path: Path) -> bool:

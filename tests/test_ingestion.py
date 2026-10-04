@@ -72,6 +72,9 @@ def test_multipage_pdf_rendering_preserves_order(settings: Settings, tmp_path: P
     assert [Path(page.image_path).name for page in pages] == ["page-0001.png", "page-0002.png"]
     assert all((settings.data_dir / page.image_path).is_file() for page in pages)
     assert (settings.data_dir / result.document.storage_path).read_bytes() == source.read_bytes()
+    stored = DocumentRepository(settings.database_path).get(result.document.document_id)
+    assert stored is not None
+    assert [page.metadata["render_dpi"] for page in stored.pages] == [150, 150]
 
 
 def test_rejects_unsupported_type(settings: Settings, tmp_path: Path) -> None:
@@ -185,8 +188,51 @@ def test_existing_foundation_database_is_migrated(settings: Settings) -> None:
     initialize_database(settings.database_path)
 
     with sqlite3.connect(settings.database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         assert connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0
         assert (
             connection.execute("SELECT value FROM application_metadata").fetchone()[0] == "existing"
         )
+
+
+def test_existing_ingestion_records_survive_quality_migration(settings: Settings) -> None:
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.execute(
+            "CREATE TABLE documents ("
+            "id TEXT PRIMARY KEY, original_filename TEXT NOT NULL, file_type TEXT NOT NULL, "
+            "mime_type TEXT NOT NULL, sha256 TEXT NOT NULL, file_size_bytes INTEGER NOT NULL, "
+            "page_count INTEGER NOT NULL, storage_path TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE document_pages ("
+            "document_id TEXT NOT NULL, page_number INTEGER NOT NULL, width INTEGER NOT NULL, "
+            "height INTEGER NOT NULL, image_path TEXT NOT NULL, "
+            "PRIMARY KEY(document_id, page_number))"
+        )
+        connection.execute(
+            "INSERT INTO documents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "old-id",
+                "old.png",
+                "PNG",
+                "image/png",
+                "a" * 64,
+                10,
+                1,
+                "old/original.png",
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO document_pages VALUES (?, ?, ?, ?, ?)",
+            ("old-id", 1, 1200, 1200, "old/page-0001.png"),
+        )
+        connection.execute("PRAGMA user_version=2")
+
+    stored = DocumentRepository(settings.database_path).get("old-id")
+
+    assert stored is not None
+    assert stored.original_filename == "old.png"
+    assert stored.pages[0].metadata == {}
+    with sqlite3.connect(settings.database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
