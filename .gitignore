@@ -11,6 +11,7 @@ dist/
 *.db
 *.db-*
 .debug/
+data/
 models/
 customer_data/
 incoming/

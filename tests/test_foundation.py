@@ -14,7 +14,7 @@ def test_database_bootstrap_is_idempotent(tmp_path):
     initialize_database(database_path)
     initialize_database(database_path)
     with sqlite3.connect(database_path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_health_reports_local_database(tmp_path):

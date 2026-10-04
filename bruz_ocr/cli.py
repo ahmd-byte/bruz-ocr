@@ -3,10 +3,13 @@
 import shutil
 import sqlite3
 import sys
+from pathlib import Path
 
 import typer
 
 from bruz_ocr import __version__
+from bruz_ocr.capture.errors import DocumentIngestionError
+from bruz_ocr.capture.service import DocumentIngestionService
 from bruz_ocr.config import Settings
 from bruz_ocr.database import initialize_database
 from bruz_ocr.logging import configure_logging
@@ -41,6 +44,28 @@ def doctor() -> None:
     typer.echo("Local mode          Enabled")
     typer.echo("External API usage  NONE")
     typer.echo("Telemetry           Disabled")
+
+
+@app.command()
+def ingest(path: Path) -> None:
+    """Ingest a local PDF, PNG, JPG, or JPEG."""
+    settings = Settings()
+    configure_logging(settings.debug)
+    try:
+        result = DocumentIngestionService(settings).ingest(path)
+    except DocumentIngestionError as error:
+        typer.echo(f"Ingestion failed: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    document = result.document
+    typer.echo("Bruz OCR")
+    typer.echo("Document ingested successfully")
+    typer.echo(f"ID: {document.document_id}")
+    typer.echo(f"File: {document.original_filename}")
+    typer.echo(f"Type: {document.file_type}")
+    typer.echo(f"Pages: {document.page_count}")
+    typer.echo(f"Size: {document.file_size_bytes} bytes")
+    typer.echo(f"SHA-256: {document.sha256}")
+    typer.echo(f"Duplicate candidate: {'Yes' if result.duplicate_candidate else 'No'}")
 
 
 @app.command()

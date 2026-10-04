@@ -15,6 +15,9 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info:
             event["exception"] = self.formatException(record.exc_info)
+        for name in ("document_id", "page_number", "duration_ms", "error_type"):
+            if hasattr(record, name):
+                event[name] = getattr(record, name)
         return json.dumps(event)
 
 
